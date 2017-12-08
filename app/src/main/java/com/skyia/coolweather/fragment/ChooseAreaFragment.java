@@ -2,6 +2,7 @@ package com.skyia.coolweather.fragment;
 
 import android.app.Fragment;
 import android.app.ProgressDialog;
+import android.content.Intent;
 import android.os.Bundle;
 import android.support.annotation.Nullable;
 import android.view.LayoutInflater;
@@ -12,8 +13,10 @@ import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.ListView;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import com.skyia.coolweather.R;
+import com.skyia.coolweather.WeatherActivity;
 import com.skyia.coolweather.db.City;
 import com.skyia.coolweather.db.County;
 import com.skyia.coolweather.db.Province;
@@ -23,7 +26,6 @@ import com.skyia.coolweather.util.Utility;
 import org.litepal.crud.DataSupport;
 
 import java.io.IOException;
-import java.security.PrivateKey;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -38,7 +40,7 @@ import okhttp3.Response;
 public class ChooseAreaFragment extends Fragment {
     public static final int LEVEL_PROVINCE = 0;
     public static final int LEVEL_CITY = 1;
-    public static final int LRVEL_COUNTY = 2;
+    public static final int LEVEL_COUNTY = 2;
 
     private ProgressDialog progressDialog;
     private TextView titleText;
@@ -51,8 +53,8 @@ public class ChooseAreaFragment extends Fragment {
     private List<City> cityList;//市列表
     private List<County> countyList;//县列表
 
-    private Province selectProvince;//选中的省份
-    private City selectCity;//选中的市
+    private Province selectedProvince;//选中的省份
+    private City selectedCity;//选中的市
     private int currentLevel;//当前选中的级别
 
     @Nullable
@@ -74,123 +76,162 @@ public class ChooseAreaFragment extends Fragment {
             @Override
             public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
                 if (currentLevel == LEVEL_PROVINCE){
-                    selectProvince = provinceList.get(position);
+                    selectedProvince = provinceList.get(position);
                     queryCities();
                 }else if (currentLevel == LEVEL_CITY){
-                    selectCity = cityList.get(position);
+                    selectedCity = cityList.get(position);
                     queryCounties();
+                }else if (currentLevel == LEVEL_COUNTY){
+                    String weatherId = countyList.get(position).getWeatherId();
+                    Intent intent = new Intent(getActivity(), WeatherActivity.class);
+                    intent.putExtra("weather_id",weatherId);
+                    startActivity(intent);
+                    getActivity().finish();
                 }
             }
         });
         backButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                if (currentLevel == LRVEL_COUNTY){
+                if (currentLevel == LEVEL_COUNTY){
                     queryCities();
                 }else if (currentLevel == LEVEL_CITY){
-                    queryProvince();
+                    queryProvinces();
                 }
             }
         });
-        queryProvince();
+        queryProvinces();
     }
 
 //    查询所有的省，优先从数据库查询，如果没有查到再去服务器查询
-    private void queryProvince(){
-        titleText.setText("中国");
-        backButton.setVisibility(View.GONE);
-        provinceList = DataSupport.findAll(Province.class);
-        if (provinceList.size()>0){
-            dataList.clear();
-            for (Province province:provinceList){
-                dataList.add(province.getProvinceName());
+private void queryProvinces() {
+   titleText.setText("中国");
+    backButton.setVisibility(View.GONE);
+    provinceList = DataSupport.findAll(Province.class);
+    if (provinceList.size() > 0) {
+        dataList.clear();
+        for (Province p : provinceList) {
+            dataList.add(p.getProvinceName());
+        }
+        adapter.notifyDataSetChanged();
+        listView.setSelection(0);
+        currentLevel = LEVEL_PROVINCE;
+    } else {
+        String url = getResources().getString(R.string.url_query_province);
+        queryFromServer(url, "province");
+    }
+}
+    //    查询所有的市，优先从数据库查询，如果没有查到再去服务器查询
+    private void queryCities() {
+        titleText.setText(selectedProvince.getProvinceName());
+        backButton.setVisibility(View.VISIBLE);
+        cityList = DataSupport.where("provinceid = ?", String.valueOf(selectedProvince.getId()))
+                .find(City.class);
+        if (cityList.size() > 0) {
+            try {
+                dataList.clear();
+                for (City c : cityList) {
+                    dataList.add(c.getCityName());
+                }
+                adapter.notifyDataSetChanged();
+                listView.setSelection(0);
+                currentLevel = LEVEL_CITY;
+            } catch (NullPointerException e) {
+                String url = getResources().getString(R.string.url_query_province);
+                queryFromServer(url, "province");
+                int provinceCode = selectedProvince.getProvinceCode();
+                url = getResources().getString(R.string.url_query_province) + provinceCode;
+                queryFromServer(url, "city");
             }
-            adapter.notifyDataSetChanged();
-            listView.setSelection(0);
-            currentLevel = LEVEL_PROVINCE;
-        }else {
-            String address = "http://guolin.tech/api/china";
-            queryFromServer(address,"province");
+        } else {
+            int provinceCode = selectedProvince.getProvinceCode();
+            String url = getResources().getString(R.string.url_query_province) + provinceCode;
+            queryFromServer(url, "city");
         }
     }
-
-//    查询选中省内所有的市，优先从数据库查询，如果没有查到再去服务器查询
-    private void queryCities(){
-        titleText.setText(selectProvince.getProvinceName());
+    //    查询所有的县，优先从数据库查询，如果没有查到再去服务器查询
+    private void queryCounties() {
+        titleText.setText(selectedCity.getCityName());
         backButton.setVisibility(View.VISIBLE);
-        cityList = DataSupport.where("province = ?",String.valueOf(selectProvince.getId())).find(City.class);
-        if (cityList.size() > 0){
-            dataList.clear();
-            for (City city:cityList){
-                dataList.add(city.getCityName());
+        countyList = DataSupport.where("cityid=?", String.valueOf(selectedCity.getId()))
+                .find(County.class);
+        if (countyList.size() > 0) {
+            try {
+                dataList.clear();
+                for (County c : countyList) {
+                    dataList.add(c.getCountyName());
+                }
+                adapter.notifyDataSetChanged();
+                listView.setSelection(0);
+                currentLevel = LEVEL_COUNTY;
+            } catch (NullPointerException e) {
+                int provinceCode = selectedProvince.getProvinceCode();
+                String url = getResources().getString(R.string.url_query_province) + provinceCode;
+                queryFromServer(url, "city");
+                url = getResources().getString(R.string.url_query_province)
+                        + selectedProvince.getProvinceCode() + "/"
+                        + selectedCity.getCityCode();
+                queryFromServer(url, "county");
             }
-            adapter.notifyDataSetChanged();
-            listView.setSelection(0);
-            currentLevel = LEVEL_CITY;
-        }else {
-            int provinceCode = selectProvince.getProvinceCode();
-            String address = "http://guolin.tech/api/china/"+provinceCode;
-            queryFromServer(address,"city");
-        }
-    }
-//    查询选中市内的所有的县，优先从数据库查询，如果没有查到再去服务器查询
-    private void queryCounties(){
-        titleText.setText(selectCity.getCityName());
-        backButton.setVisibility(View.VISIBLE);
-        countyList = DataSupport.where("cityid = ?",String.valueOf(selectCity.getId())).find(County.class);
-        if (countyList.size() > 0){
-            dataList.clear();
-            for (County county:countyList){
-                dataList.add(county.getCountyName());
-            }
-            adapter.notifyDataSetChanged();
-            listView.setSelection(0);
-            currentLevel = LRVEL_COUNTY;
-        }else {
-            int provinceCode = selectProvince.getProvinceCode();
-            int cityCode = selectCity.getCityCode();
-            String adress = "http://guolin.tech/api/china" + provinceCode +"/"+cityCode;
-            queryFromServer(adress,"county");
+        } else {
+            String url = getResources().getString(R.string.url_query_province)
+                    + selectedProvince.getProvinceCode() + "/"
+                    + selectedCity.getCityCode();
+            queryFromServer(url, "county");
         }
     }
 //  根据传入的地址和类型从服务器上查询数据
-    private void queryFromServer(String address, final String type) {
-        showProgressDialog();
-        HttpUtil.sendOkHttpRequest(address, new Callback() {
-            @Override
-            public void onFailure(Call call, IOException e) {
-
-            }
-
-            @Override
-            public void onResponse(Call call, Response response) throws IOException {
-                String responseText = response.body().string();
-                boolean result = false;
-                if ("province".equals(type)){
-                    result = Utility.handleProvinceResponse(responseText);
-                }else if ("city".equals(type)){
-                    result = Utility.handleCityResponse(responseText,selectProvince.getId());
-                }else if ("county".equals(type)){
-                    result = Utility.handleCountyResponse(responseText,selectCity.getId());
+    private void queryFromServer(String url, final String type) {
+    showProgressDialog();
+    HttpUtil.sendOkHttpRequest(url, new Callback() {
+        @Override
+        public void onFailure(Call call, IOException e) {
+            getActivity().runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    closeProgressDialog();
+                    Toast.makeText(getContext(), "加载失败", Toast.LENGTH_SHORT).show();
                 }
-                if (result){
-                    getActivity().runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            closeProgressDialog();
-                            if ("province".equals(type)){
-                                queryProvince();
-                            }else if ("city".equals(type)){
+            });
+        }
+
+        @Override
+        public void onResponse(Call call, Response response) throws IOException {
+            String responseData = response.body().string();
+            boolean result = false;
+            switch (type) {
+                case "province":
+                    result = Utility.handleProvinceResponse(responseData);
+                    break;
+                case "city":
+                    result = Utility.handleCityResponse(responseData, selectedProvince.getId());
+                    break;
+                case "county":
+                    result = Utility.handleCountyResponse(responseData, selectedCity.getId());
+                    break;
+            }
+            if (result) {
+                getActivity().runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        closeProgressDialog();
+                        switch (type) {
+                            case "province":
+                                queryProvinces();
+                                break;
+                            case "city":
                                 queryCities();
-                            }else if ("county".equals(type)){
+                                break;
+                            case "county":
                                 queryCounties();
-                            }
+                                break;
                         }
-                    });
-                }
+                    }
+                });
             }
-        });
-    }
+        }
+    });
+}
 //  显示进度对话框
     private void showProgressDialog() {
         if (progressDialog == null){
